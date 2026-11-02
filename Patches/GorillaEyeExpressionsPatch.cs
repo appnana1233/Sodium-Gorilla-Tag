@@ -1,13 +1,6 @@
-﻿// Code By Gorilla-Optimizer, made by sevvy-wevvy https://github.com/sevvy-wevvy/Gorilla-Optimizer/
+// Code By Gorilla-Optimizer, made by sevvy-wevvy https://github.com/sevvy-wevvy/Gorilla-Optimizer/
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
-using GorillaTag;
-using GorillaTag.Cosmetics;
 using HarmonyLib;
 using UnityEngine;
 
@@ -51,9 +44,13 @@ namespace Sodium
             if (c.r == null)
                 return true;
 
-            if (c.mat == null)
+            // re-acquire if the game swapped the renderer's material out from under us
+            if (c.mat == null || c.r.sharedMaterial != c.mat)
             {
-                c.mat = c.r.material;
+                c.mat = OwnedMaterial.Acquire(c.r);
+                if (c.mat == null)
+                    return true;
+
                 c.lastUV = new Vector2(-999f, -999f);
             }
 

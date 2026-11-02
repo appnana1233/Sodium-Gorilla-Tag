@@ -1,13 +1,6 @@
-﻿// Code By Gorilla-Optimizer, made by sevvy-wevvy https://github.com/sevvy-wevvy/Gorilla-Optimizer/
+// Code By Gorilla-Optimizer, made by sevvy-wevvy https://github.com/sevvy-wevvy/Gorilla-Optimizer/
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
-using GorillaTag;
-using GorillaTag.Cosmetics;
 using HarmonyLib;
 using UnityEngine;
 
@@ -41,6 +34,20 @@ namespace Sodium
                 || mouthFlap.faces.Length == 0 || mouthFlap.cycleDuration <= 0f)
                 return true;
 
+            var c = caches.GetOrCreateValue(__instance);
+
+            // rebuild the cache if the material is gone, the renderer changed,
+            // or the game swapped the renderer's material out from under us
+            if (c.mat == null || c.renderer != ___targetFaceRenderer
+                || c.renderer.sharedMaterial != c.mat)
+            {
+                c.renderer = ___targetFaceRenderer;
+                c.mat = OwnedMaterial.Acquire(___targetFaceRenderer);
+                c.lastIdx = -1;
+                c.lastFaces = null;
+                if (c.mat == null) return true;
+            }
+
             // advance time same as original
             ___activeFlipbookPlayTime += ___deltaTime;
             ___activeFlipbookPlayTime %= mouthFlap.cycleDuration;
@@ -49,17 +56,6 @@ namespace Sodium
             int idx = Mathf.FloorToInt(___activeFlipbookPlayTime * len / mouthFlap.cycleDuration);
             if (idx >= len) idx = len - 1;
             if (idx < 0) idx = 0;
-
-            var c = caches.GetOrCreateValue(__instance);
-
-            // rebuild the cache if the material is gone or the renderer changed
-            if (c.mat == null || c.renderer != ___targetFaceRenderer)
-            {
-                c.renderer = ___targetFaceRenderer;
-                c.mat = ___targetFaceRenderer.material;
-                c.lastIdx = -1;
-                c.lastFaces = null;
-            }
 
             // skip the gpu call if frame didnt change
             if (idx == c.lastIdx && mouthFlap.faces == c.lastFaces)

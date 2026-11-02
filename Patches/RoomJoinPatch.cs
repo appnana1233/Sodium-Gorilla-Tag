@@ -1,9 +1,7 @@
 // Code by Potassium, made by niko-tar-gz https://github.com/niko-tar-gz/Potassium
 
 using System.Collections.Generic;
-using GorillaNetworking;
 using HarmonyLib;
-using UnityEngine;
 
 namespace Sodium
 {
