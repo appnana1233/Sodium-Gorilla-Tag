@@ -2,13 +2,11 @@
 
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using BepInEx.Configuration;
 
 namespace Sodium
 {
     internal sealed class LODBiasStuff : MonoBehaviour
     {
-        private const float LowBias = 0.34f;
         private float originalLodBias;
 
         private void Awake()
