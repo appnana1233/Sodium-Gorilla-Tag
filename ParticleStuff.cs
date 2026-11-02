@@ -6,6 +6,8 @@ namespace Sodium
 {
     internal sealed class ParticleStuff : MonoBehaviour
     {
+        private const int RigsPerFrame = 2;
+
         private sealed class State
         {
             internal bool WasPlaying;
@@ -16,6 +18,8 @@ namespace Sodium
         private readonly Dictionary<ParticleSystem, State> tracked = new Dictionary<ParticleSystem, State>();
         private readonly List<ParticleSystem> buffer = new List<ParticleSystem>();
         private readonly List<ParticleSystem> scratch = new List<ParticleSystem>();
+        private VRRig[] pendingRigs;
+        private int pendingIndex;
         private bool applied;
         private float nextScanTime;
 
@@ -27,11 +31,13 @@ namespace Sodium
         private void OnDestroy()
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            pendingRigs = null;
             RestoreAll();
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            pendingRigs = null;
             nextScanTime = 0f;
         }
 
@@ -43,7 +49,10 @@ namespace Sodium
             if (wanted != applied)
             {
                 if (!wanted)
+                {
+                    pendingRigs = null;
                     RestoreAll();
+                }
 
                 applied = wanted;
                 nextScanTime = 0f;
@@ -52,27 +61,51 @@ namespace Sodium
             if (!wanted)
                 return;
 
+            if (pendingRigs != null)
+            {
+                ScanChunk();
+                return;
+            }
+
             float now = Time.unscaledTime;
             if (now < nextScanTime)
                 return;
 
             nextScanTime = now + Mathf.Max(0.5f, plugin.ParticleScanInterval);
-            Scan();
+            BeginScan();
         }
 
-        private void Scan()
+        private void BeginScan()
         {
             PurgeDestroyed();
 
             VRRig[] rigs = FindObjectsByType<VRRig>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            for (int i = 0; i < rigs.Length; i++)
+            if (rigs.Length == 0)
+                return;
+
+            pendingRigs = rigs;
+            pendingIndex = 0;
+            ScanChunk();
+        }
+
+        private void ScanChunk()
+        {
+            int end = Mathf.Min(pendingIndex + RigsPerFrame, pendingRigs.Length);
+            while (pendingIndex < end)
             {
+                VRRig rig = pendingRigs[pendingIndex++];
+                if (rig == null)
+                    continue;
+
                 buffer.Clear();
-                rigs[i].GetComponentsInChildren(true, buffer);
-                for (int j = 0; j < buffer.Count; j++)
-                    Suppress(buffer[j]);
+                rig.GetComponentsInChildren(true, buffer);
+                for (int i = 0; i < buffer.Count; i++)
+                    Suppress(buffer[i]);
             }
+
             buffer.Clear();
+            if (pendingIndex >= pendingRigs.Length)
+                pendingRigs = null;
         }
 
         private void PurgeDestroyed()

@@ -28,21 +28,25 @@ namespace Sodium
         private enum Phase { Idle, LightRunning, HardRunning, Settling }
         private const ulong IncrementalBudgetNs = 1000000UL;
         private const float SettleSeconds = 3f;
+        private const float MaxPhaseSeconds = 30f;
+        private const float MaxBackoffSeconds = 600f;
+        private const int MaxBackoffDoublings = 10;
         private const int MinimumDropPercent = 1;
 
         private Phase phase = Phase.Idle;
         private int level;
         private int baselineLoad;
+        private int failedCycles;
         private float settleUntil;
+        private float phaseDeadline;
         private AsyncOperation unloadOp;
         private float nextCheckTime;
         private float nextAllowedCollectTime;
-        private bool gaveUp;
         private bool unsupported;
 
         private void Update()
         {
-            if (gaveUp || unsupported || Plugin.Instance == null || !Plugin.Instance.MemoryWatchdog)
+            if (unsupported || Plugin.Instance == null || !Plugin.Instance.MemoryWatchdog)
                 return;
 
             switch (phase)
@@ -52,6 +56,13 @@ namespace Sodium
                     break;
 
                 case Phase.LightRunning:
+                    if (Time.unscaledTime >= phaseDeadline)
+                    {
+                        Plugin.Log?.LogWarning("Memory watchdog: incremental collection did not finish in time, evaluating what it freed so far.");
+                        BeginSettle();
+                        break;
+                    }
+
                     bool stillRunning;
                     try { stillRunning = GarbageCollector.CollectIncremental(IncrementalBudgetNs); }
                     catch (Exception e) { Abort(e); return; }
@@ -62,6 +73,12 @@ namespace Sodium
                 case Phase.HardRunning:
                     if (unloadOp == null || unloadOp.isDone)
                         BeginSettle();
+                    else if (Time.unscaledTime >= phaseDeadline)
+                    {
+                        failedCycles++;
+                        Plugin.Log?.LogWarning("Memory watchdog: unused-asset unload did not finish in time, giving up on this cleanup.");
+                        FinishCycle();
+                    }
                     break;
 
                 case Phase.Settling:
@@ -79,11 +96,24 @@ namespace Sodium
 
             nextCheckTime = now + Mathf.Max(1f, Plugin.Instance.MemoryWatchdogCheckInterval);
 
+            if (unloadOp != null)
+            {
+                if (!unloadOp.isDone)
+                    return;
+                unloadOp = null;
+            }
+
             if (!TryGetMemoryLoad(out int load))
                 return;
 
             int threshold = Mathf.Clamp(Plugin.Instance.MemoryWatchdogThreshold, 50, 99);
-            if (load < threshold || now < nextAllowedCollectTime)
+            if (load < threshold)
+            {
+                failedCycles = 0;
+                return;
+            }
+
+            if (now < nextAllowedCollectTime)
                 return;
 
             baselineLoad = load;
@@ -98,6 +128,7 @@ namespace Sodium
             {
                 if (GarbageCollector.isIncremental)
                 {
+                    phaseDeadline = Time.unscaledTime + MaxPhaseSeconds;
                     phase = Phase.LightRunning;
                 }
                 else
@@ -117,10 +148,8 @@ namespace Sodium
             level = 2;
             try
             {
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
                 unloadOp = Resources.UnloadUnusedAssets();
+                phaseDeadline = Time.unscaledTime + MaxPhaseSeconds;
                 phase = Phase.HardRunning;
             }
             catch (Exception e)
@@ -149,6 +178,7 @@ namespace Sodium
             if (dropped)
             {
                 Plugin.Log?.LogInfo($"Memory watchdog: {(level == 1 ? "light" : "hard")} cleanup worked, RAM {baselineLoad}% -> {load}%.");
+                failedCycles = 0;
                 FinishCycle();
                 return;
             }
@@ -161,20 +191,27 @@ namespace Sodium
                 return;
             }
 
-            Plugin.Log?.LogWarning($"Memory watchdog: hard cleanup did not lower RAM either ({baselineLoad}% -> {load}%). Memory is not held by managed garbage, so the watchdog is stopping forced cleanups for this session.");
-            gaveUp = true;
-            phase = Phase.Idle;
+            failedCycles++;
+            Plugin.Log?.LogWarning($"Memory watchdog: hard cleanup did not lower RAM either ({baselineLoad}% -> {load}%). The memory may be held by other applications or by native memory Unity cannot free. Cleanups will be retried no sooner than {GetCooldownSeconds():0}s from now.");
+            FinishCycle();
+        }
+
+        private float GetCooldownSeconds()
+        {
+            float cooldown = Mathf.Max(5f, Plugin.Instance.MemoryWatchdogCooldown);
+            float backedOff = cooldown * Mathf.Pow(2f, Mathf.Min(failedCycles, MaxBackoffDoublings));
+            return Mathf.Max(cooldown, Mathf.Min(backedOff, MaxBackoffSeconds));
         }
 
         private void FinishCycle()
         {
             phase = Phase.Idle;
-            unloadOp = null;
-            nextAllowedCollectTime = Time.unscaledTime + Mathf.Max(5f, Plugin.Instance.MemoryWatchdogCooldown);
+            nextAllowedCollectTime = Time.unscaledTime + GetCooldownSeconds();
         }
 
         private void Abort(Exception e)
         {
+            failedCycles++;
             Plugin.Log?.LogWarning($"Memory watchdog: cleanup failed: {e.Message}");
             FinishCycle();
         }

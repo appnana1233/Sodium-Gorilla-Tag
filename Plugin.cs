@@ -11,14 +11,9 @@ namespace Sodium
         internal static Plugin Instance { get; private set; }
         internal static ManualLogSource Log { get; private set; }
         internal bool DeferSharedBlocksStartup { get; private set; }
-        internal bool ReduceDistantCosmetics { get; private set; }
         internal bool NoAA { get; private set; }
-        internal float CosmeticFullDetailDistance { get; private set; }
-        internal float CosmeticMaximumDistance { get; private set; }
-        internal int CosmeticFullDetailCount { get; private set; }
         internal bool NoReflections { get; private set; }
         internal bool LowestShadowResolution { get; private set; }
-        internal int CosmeticMaximumCount { get; private set; }
         internal bool SkipForcedLeaveGarbageCollection { get; private set; }
         internal bool SkipTimedUnusedAssetUnloads { get; private set; }
         internal bool EyeExpressions { get; private set; }
@@ -63,12 +58,6 @@ namespace Sodium
                 "Turns off realtime reflection probes. Mainly useful for custom maps that use them. Reflective surfaces may look flatter.").Value;
             LowestShadowResolution = Config.Bind("Quality", "Lowest shadow resolution", true,
                 "Sets the shadow map resolution to the lowest option for more FPS. Shadows will look blurrier. Only matters while shadows are enabled.").Value;
-            ReduceDistantCosmetics = Config.Bind("Rendering", "Reduce distant cosmetic detail", true,
-                "Locally culls distant remote-player cosmetics. Does not modify networking or other players.").Value;
-            CosmeticFullDetailDistance = Config.Bind("Rendering", "Full-detail cosmetic distance", 4.5f).Value;
-            CosmeticMaximumDistance = Config.Bind("Rendering", "Maximum cosmetic distance", 8f).Value;
-            CosmeticFullDetailCount = Config.Bind("Rendering", "Full-detail player count", 5).Value;
-            CosmeticMaximumCount = Config.Bind("Rendering", "Maximum detailed player count", 10).Value;
             TextureTransitionRate = Config.Bind("Rendering", "Texture transitions per second", 30f,
                 "Limits purely visual texture-transition updates. Set to 0 to leave the game rate unchanged.").Value;
             MouthFlap = Config.Bind("Rendering", "Cache mouth flap updates", true,
@@ -92,17 +81,20 @@ namespace Sodium
             SkipInactiveEntityLeaveScans = Config.Bind("Stutter", "Skip inactive-zone entity leave scans", true,
                 "Skips unused full entity scans performed by every inactive zone when a remote player leaves.").Value;
             MemoryWatchdog = Config.Bind("Memory", "Enable memory watchdog", true,
-                "Triggers a garbage collection when system RAM usage reaches the threshold. Useful since skipped forced collections and asset unloads can let memory climb. Windows only.").Value;
+                "Runs a garbage collection when system RAM usage reaches the threshold, then an unused-asset unload if that does not help. Useful since skipped forced collections and asset unloads can let memory climb. Windows only.").Value;
             MemoryWatchdogThreshold = Config.Bind("Memory", "Memory watchdog threshold (%)", 90,
                 "System RAM usage percentage at or above which a garbage collection is triggered. Clamped to 50-99.").Value;
             MemoryWatchdogCheckInterval = Config.Bind("Memory", "Memory watchdog check interval (seconds)", 5f,
                 "How often RAM usage is checked. Minimum 1 second.").Value;
             MemoryWatchdogCooldown = Config.Bind("Memory", "Memory watchdog cooldown (seconds)", 60f,
-                "Minimum time between triggered collections, so a system that stays above the threshold does not collect repeatedly. Minimum 5 seconds.").Value;
+                "Minimum time between triggered cleanups, so a system that stays above the threshold does not clean up repeatedly. The wait doubles after each cleanup that fails to lower RAM, up to 10 minutes, and resets once RAM drops below the threshold or a cleanup works. Minimum 5 seconds.").Value;
             disableCosmeticParticlesEntry = Config.Bind("Particles", "Disable cosmetic particles", false,
                 "Turns off particle effects on player cosmetics for more FPS. Can be changed while the game is running, and the effects come back when this is turned off.");
             particleScanIntervalEntry = Config.Bind("Particles", "Particle scan interval (seconds)", 2f,
                 "How often newly spawned particle systems are found and switched off. Lower values catch new effects sooner but cost more CPU. Minimum 0.5 seconds.");
+
+            if (SkipTimedUnusedAssetUnloads && !MemoryWatchdog)
+                Logger.LogWarning("Timed unused-asset unloads are skipped and the memory watchdog is off, so nothing will unload unused assets between scene changes. Memory use can keep growing.");
 
             bool patched = HarmonyPatches.ApplyHarmonyPatches();
             if (patched)
